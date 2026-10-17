@@ -1,0 +1,184 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Theme {
+  SYSTEM
+  DARK
+  LIGHT
+}
+
+enum MeetingStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+}
+
+enum ParticipantRole {
+  HOST
+  PARTICIPANT
+  GUEST
+}
+
+enum ParticipantStatus {
+  WAITING
+  ADMITTED
+  DENIED
+  REMOVED
+  LEFT
+}
+
+model User {
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique
+  passwordHash     String    @map("password_hash")
+  displayName      String    @map("display_name")
+  avatarUrl        String?   @map("avatar_url")
+  theme            Theme     @default(SYSTEM)
+  preferences      Json      @default("{}")
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  refreshTokens RefreshToken[]
+  hostedMeetings Meeting[]     @relation("MeetingHost")
+  participations Participant[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  familyId   String    @map("family_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  userAgent  String?   @map("user_agent")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  replacedBy String?   @map("replaced_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+model RateLimitBucket {
+  key       String   @id
+  count     Int
+  resetAt   DateTime @map("reset_at") @db.Timestamptz(3)
+
+  @@map("rate_limit_buckets")
+}
+
+model Meeting {
+  id              String        @id @default(uuid()) @db.Uuid
+  code            String        @unique
+  title           String
+  description     String?
+  hostId          String        @map("host_id") @db.Uuid
+  status          MeetingStatus @default(SCHEDULED)
+  scheduledFor    DateTime?     @map("scheduled_for") @db.Timestamptz(3)
+  durationMinutes Int           @default(60) @map("duration_minutes")
+  allowGuests     Boolean       @default(false) @map("allow_guests")
+  waitingRoom     Boolean       @default(true) @map("waiting_room")
+  locked          Boolean       @default(false)
+  topicEpoch      Int           @default(0) @map("topic_epoch")
+  e2eeMedia       Boolean       @default(false) @map("e2ee_media")
+  startedAt       DateTime?     @map("started_at") @db.Timestamptz(3)
+  endedAt         DateTime?     @map("ended_at") @db.Timestamptz(3)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  host         User          @relation("MeetingHost", fields: [hostId], references: [id], onDelete: Cascade)
+  participants Participant[]
+  messages     ChatMessage[]
+  files        SharedFile[]
+  whiteboard   Whiteboard?
+
+  @@index([hostId])
+  @@index([scheduledFor])
+  @@map("meetings")
+}
+
+model Participant {
+  id          String            @id @default(uuid()) @db.Uuid
+  meetingId   String            @map("meeting_id") @db.Uuid
+  userId      String?           @map("user_id") @db.Uuid
+  displayName String            @map("display_name")
+  role        ParticipantRole   @default(PARTICIPANT)
+  status      ParticipantStatus @default(WAITING)
+  joinedAt    DateTime?         @map("joined_at") @db.Timestamptz(3)
+  leftAt      DateTime?         @map("left_at") @db.Timestamptz(3)
+  lastSeenAt  DateTime?         @map("last_seen_at") @db.Timestamptz(3)
+  handRaisedAt DateTime?        @map("hand_raised_at") @db.Timestamptz(3)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  meeting  Meeting       @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  user     User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages ChatMessage[]
+  files    SharedFile[]
+
+  @@unique([meetingId, userId])
+  @@index([meetingId, status])
+  @@map("participants")
+}
+
+/// Chat messages are end-to-end encrypted: the server only ever sees ciphertext.
+model ChatMessage {
+  id            String   @id @default(uuid()) @db.Uuid
+  meetingId     String   @map("meeting_id") @db.Uuid
+  participantId String   @map("participant_id") @db.Uuid
+  keyId         String   @map("key_id")
+  iv            String
+  ciphertext    String
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  meeting     Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId, createdAt])
+  @@map("chat_messages")
+}
+
+/// Shared files are encrypted client-side; metadata (name, type) is encrypted too.
+model SharedFile {
+  id            String   @id @default(uuid()) @db.Uuid
+  meetingId     String   @map("meeting_id") @db.Uuid
+  participantId String   @map("participant_id") @db.Uuid
+  storagePath   String   @unique @map("storage_path")
+  keyId         String   @map("key_id")
+  iv            String
+  encryptedMeta String   @map("encrypted_meta")
+  metaIv        String   @map("meta_iv")
+  sizeBytes     Int      @map("size_bytes")
+  uploaded      Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  meeting     Meeting     @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  participant Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId, createdAt])
+  @@map("shared_files")
+}
+
+model Whiteboard {
+  meetingId String   @id @map("meeting_id") @db.Uuid
+  elements  Json     @default("[]")
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@map("whiteboards")
+}
