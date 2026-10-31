@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # Build-time placeholders; real values live in Vercel.
+      DATABASE_URL: postgresql://user:pass@localhost:5432/db
+      JWT_ACCESS_SECRET: ci-placeholder-access-secret-at-least-32-chars
+      JWT_REFRESH_SECRET: ci-placeholder-refresh-secret-at-least-32-chars
+      ROOM_TOPIC_SECRET: ci-placeholder-topic-secret
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
