@@ -1,10 +1,14 @@
 import "server-only";
 import { z } from "zod";
 
+/** Trims whitespace and stray quotes left over from pasting `KEY="value"` lines into a dashboard. */
 const optional = z
   .string()
   .optional()
-  .transform((v) => (v && v.trim() ? v.trim() : undefined));
+  .transform((v) => {
+    const clean = v?.trim().replace(/^(["'])(.*)\1$/, "$2").trim();
+    return clean ? clean : undefined;
+  });
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
