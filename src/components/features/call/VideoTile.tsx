@@ -33,23 +33,32 @@ function QualityIndicator({ quality }: { quality: TileModel["quality"] }) {
   );
 }
 
-function useHasLiveVideo(stream: MediaStream | undefined, version: number) {
-  const [live, setLive] = useState(false);
+/**
+ * Whether the <video> element is actually rendering frames. Chrome can leave a remote track's
+ * `muted` flag stuck at true after renegotiation even while frames flow, so we look at what the
+ * element decodes instead of trusting the flag.
+ */
+function useVideoRendering(
+  ref: React.RefObject<HTMLVideoElement | null>,
+  stream: MediaStream | undefined,
+  version: number,
+) {
+  const [rendering, setRendering] = useState(false);
   useEffect(() => {
-    const track = stream?.getVideoTracks()[0];
-    const update = () => setLive(!!track && track.readyState === "live" && !track.muted);
+    const el = ref.current;
+    if (!el) return;
+    const update = () =>
+      setRendering(el.videoWidth > 0 && !!stream?.getVideoTracks().some((t) => t.readyState === "live"));
+    const events = ["loadeddata", "resize", "playing", "emptied"] as const;
+    events.forEach((e) => el.addEventListener(e, update));
+    const poll = setInterval(update, 1000);
     update();
-    if (!track) return;
-    track.addEventListener("mute", update);
-    track.addEventListener("unmute", update);
-    track.addEventListener("ended", update);
     return () => {
-      track.removeEventListener("mute", update);
-      track.removeEventListener("unmute", update);
-      track.removeEventListener("ended", update);
+      events.forEach((e) => el.removeEventListener(e, update));
+      clearInterval(poll);
     };
-  }, [stream, version]);
-  return live;
+  }, [ref, stream, version]);
+  return rendering;
 }
 
 export const VideoTile = memo(function VideoTile({
@@ -68,9 +77,9 @@ export const VideoTile = memo(function VideoTile({
   const pinnedId = useUiStore((s) => s.pinnedId);
   const pin = useUiStore((s) => s.pin);
   const stream = session.getStream(tile.participantId, tile.kind);
-  const liveVideo = useHasLiveVideo(stream, tile.mediaVersion);
-  const showVideo = tile.kind === "screen" || (tile.cam && liveVideo);
   const ref = useMediaStream<HTMLVideoElement>(stream, tile.mediaVersion);
+  const rendering = useVideoRendering(ref, stream, tile.mediaVersion);
+  const showVideo = rendering && (tile.kind === "screen" || tile.cam);
   const reconnecting =
     !tile.isSelf &&
     (tile.connection === "connecting" || tile.connection === "disconnected" || tile.connection === "new");

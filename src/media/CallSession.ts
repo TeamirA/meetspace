@@ -69,6 +69,8 @@ export class CallSession {
   private keyBootstrapTimer?: ReturnType<typeof setTimeout>;
   private unsubscribers: (() => void)[] = [];
   private ended = false;
+  /** Set while this host is ending the meeting, so the broadcast echo shows the right message. */
+  private endingForEveryone = false;
   readonly joinedAt = Date.now();
   levels = new Map<string, number>();
 
@@ -155,10 +157,13 @@ export class CallSession {
 
   /** Fetches room credentials and ICE servers, then connects. */
   static async join(code: string, media: LocalMediaController, notify: (n: Notice) => void) {
-    const session = await api<RoomSessionDto>(`/api/meetings/${code}/session`, { method: "POST" });
-    const turn = await api<{ iceServers: IceServer[] }>(`/api/meetings/${code}/turn`).catch(() => ({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    }));
+    // Both only require admitted membership, so fetch them in parallel.
+    const [session, turn] = await Promise.all([
+      api<RoomSessionDto>(`/api/meetings/${code}/session`, { method: "POST" }),
+      api<{ iceServers: IceServer[] }>(`/api/meetings/${code}/turn`).catch(() => ({
+        iceServers: [{ urls: "stun:stun.l.google.com:19302" }] as IceServer[],
+      })),
+    ]);
     const call = new CallSession(
       code,
       session.meeting,
@@ -294,7 +299,7 @@ export class CallSession {
   }
 
   /** Leave the call. `reason` decides the end screen. */
-  async end(reason: "left" | "ended" | "removed" | "duplicate" = "left") {
+  async end(reason: "left" | "ended" | "ended-by-you" | "removed" | "duplicate" = "left") {
     if (this.ended) return;
     this.ended = true;
     await this.whiteboard.flush().catch(() => undefined);
@@ -307,6 +312,7 @@ export class CallSession {
     const messages = {
       left: "You left the meeting",
       ended: "The host ended the meeting",
+      "ended-by-you": "You ended the meeting for everyone",
       removed: "You were removed from the meeting",
       duplicate: "You joined this meeting from another tab",
     } as const;
@@ -477,10 +483,14 @@ export class CallSession {
   private scheduleKeyBootstrap() {
     clearTimeout(this.keyBootstrapTimer);
     if (this.keyring.state.ready) return;
-    this.keyBootstrapTimer = setTimeout(() => {
+    const attempt = () => {
       const someoneHasKey = [...this.presence.values()].some((p) => p.keyId);
       if (!this.keyring.state.ready && !someoneHasKey && this.isLeader()) void this.keyring.createKey();
-    }, 1500);
+    };
+    // Alone in the room after the first presence sync: nobody can offer a key, so create it now.
+    // Otherwise give existing members a moment to hand theirs over.
+    if (this.initialSyncDone && this.presence.size === 0) attempt();
+    else this.keyBootstrapTimer = setTimeout(attempt, 1500);
   }
 
   private async onKeyChanged(fingerprint: string | null) {
@@ -502,9 +512,15 @@ export class CallSession {
   private async onMessage(env: Envelope) {
     const fromPresence = this.presence.get(env.from);
     switch (env.type) {
-      case "signal":
-        this.peers.handleSignal(env.from, env.fromSession, env.payload as SignalMessage);
+      case "signal": {
+        // An offer can arrive before presence tells us about its sender; set the peer up now
+        // instead of dropping it (which used to stall connections for several seconds).
+        const signal = env.payload as SignalMessage;
+        const isOffer = signal.kind === "description" && signal.description.type === "offer";
+        if (isOffer && !this.peers.has(env.from, env.fromSession)) this.peers.ensurePeer(env.from, env.fromSession);
+        this.peers.handleSignal(env.from, env.fromSession, signal);
         break;
+      }
       case "key-offer":
         await this.keyring.receiveOffer(env.from, env.payload as KeyOffer);
         break;
@@ -581,7 +597,7 @@ export class CallSession {
         callStore.set({ locked: e.locked });
         break;
       case "meeting-ended":
-        await this.end("ended");
+        await this.end(this.endingForEveryone ? "ended-by-you" : "ended");
         break;
     }
   }
@@ -979,10 +995,13 @@ export class CallSession {
   // ── Host controls ──────────────────────────────────────────────────────────
 
   async hostAction(body: { action: string; participantId?: string }) {
+    if (body.action === "end") this.endingForEveryone = true;
     try {
       await api(`/api/meetings/${this.code}/host`, { method: "POST", body });
+      if (body.action === "end") return void this.end("ended-by-you");
       await this.refreshParticipants();
     } catch (e) {
+      this.endingForEveryone = false;
       this.notify({ kind: "error", title: (e as Error).message });
     }
   }

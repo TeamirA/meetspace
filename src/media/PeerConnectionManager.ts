@@ -21,6 +21,8 @@ interface Peer {
   ignoreOffer: boolean;
   isSettingRemoteAnswerPending: boolean;
   queue: Promise<void>;
+  /** Candidates that arrived before any remote description; applied right after it is set. */
+  pendingCandidates: RTCIceCandidateInit[];
   audioSender: RTCRtpSender;
   videoSender: RTCRtpSender;
   screenSenders: RTCRtpSender[];
@@ -107,6 +109,7 @@ export class PeerConnectionManager {
       ignoreOffer: false,
       isSettingRemoteAnswerPending: false,
       queue: Promise.resolve(),
+      pendingCandidates: [],
       audioSender: addSender("audio", local.audio),
       videoSender: addSender("video", local.video),
       screenSenders: [],
@@ -189,6 +192,7 @@ export class PeerConnectionManager {
       peer.isSettingRemoteAnswerPending = description.type === "answer";
       await pc.setRemoteDescription(description); // implicit rollback when polite and colliding
       peer.isSettingRemoteAnswerPending = false;
+      for (const c of peer.pendingCandidates.splice(0)) await pc.addIceCandidate(c).catch(() => undefined);
       if (description.type === "offer") {
         await pc.setLocalDescription();
         if (pc.localDescription) {
@@ -199,6 +203,10 @@ export class PeerConnectionManager {
         }
       }
     } else {
+      if (!pc.remoteDescription) {
+        peer.pendingCandidates.push(msg.candidate);
+        return;
+      }
       try {
         await pc.addIceCandidate(msg.candidate);
       } catch (e) {
