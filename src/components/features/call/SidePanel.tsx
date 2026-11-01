@@ -2,7 +2,7 @@
 
 import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { ChatPanel } from "@/components/features/chat/ChatPanel";
 import { FilesPanel } from "@/components/features/files/FilesPanel";
 import { ParticipantsPanel } from "@/components/features/participants/ParticipantsPanel";
@@ -12,8 +12,13 @@ const titles = { chat: "In-call messages", participants: "People", files: "Share
 
 export function SidePanel() {
   const panel = useUiStore((s) => s.panel);
-  const close = useUiStore((s) => s.closePanel);
+  const closePanel = useUiStore((s) => s.closePanel);
   const ref = useRef<HTMLElement>(null);
+  // Release focus from the closing panel (e.g. the chat box) so shortcuts like H work right away.
+  const close = useCallback(() => {
+    if (ref.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
+    closePanel();
+  }, [closePanel]);
 
   useEffect(() => {
     if (!panel) return;

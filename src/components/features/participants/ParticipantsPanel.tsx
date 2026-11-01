@@ -46,6 +46,7 @@ export function ParticipantsPanel() {
   const people = [
     {
       id: self.id,
+      avatarName: self.displayName,
       name: `${self.displayName} (You)`,
       role: self.role,
       mic: local.mic,
@@ -56,6 +57,7 @@ export function ParticipantsPanel() {
     },
     ...Object.values(participants).map((p) => ({
       id: p.id,
+      avatarName: p.displayName,
       name: p.displayName,
       role: p.role,
       mic: p.mic,
@@ -71,7 +73,7 @@ export function ParticipantsPanel() {
 
   const Row = ({ p }: { p: (typeof people)[number] & { isGuest?: boolean } }) => (
     <li className="hover:bg-muted/60 flex items-center gap-3 rounded-xl px-2 py-2">
-      <Avatar name={p.name} size={36} />
+      <Avatar name={p.avatarName} size={36} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate text-sm font-medium">{p.name}</span>

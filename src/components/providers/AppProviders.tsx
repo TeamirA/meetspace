@@ -38,7 +38,7 @@ export function AppProviders({ children, nonce }: { children: React.ReactNode; n
 function ThemedToaster() {
   return (
     <Toaster
-      position="top-center"
+      position="top-right"
       closeButton
       toastOptions={{
         classNames: {

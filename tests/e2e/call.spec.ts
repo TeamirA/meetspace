@@ -49,6 +49,27 @@ test("host admits a guest from the waiting room; they see each other, chat and d
   await host.page.keyboard.press("c");
   await expect(host.page.getByText("hello from the member")).toBeVisible({ timeout: 15_000 });
 
+  // Remote video is actually rendering (not an avatar placeholder) on both sides.
+  for (const p of [host.page, member.page]) {
+    await expect
+      .poll(
+        () =>
+          p.evaluate(
+            () =>
+              [...document.querySelectorAll("video")].filter(
+                (v) => v.videoWidth > 0 && getComputedStyle(v).opacity === "1",
+              ).length,
+          ),
+        { timeout: 20_000 },
+      )
+      .toBe(2);
+  }
+
+  // Shortcuts work immediately after closing the chat with Escape (focus is released).
+  await member.page.keyboard.press("Escape");
+  await member.page.keyboard.press("h");
+  await expect(host.page.getByLabel("Hand raised")).toBeVisible({ timeout: 10_000 });
+
   // Mic toggle is reflected for the other participant.
   await host.page.keyboard.press("Escape");
   await host.page.keyboard.press("m");
@@ -58,6 +79,7 @@ test("host admits a guest from the waiting room; they see each other, chat and d
   await host.page.getByRole("button", { name: "Leave or end meeting" }).click();
   await host.page.getByRole("menuitem", { name: "End meeting for everyone" }).click();
   await expect(member.page.getByText("The host ended the meeting")).toBeVisible({ timeout: 15_000 });
+  await expect(host.page.getByText("You ended the meeting for everyone")).toBeVisible();
 
   await host.context.close();
   await member.context.close();
