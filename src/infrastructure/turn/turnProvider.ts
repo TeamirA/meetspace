@@ -30,26 +30,52 @@ async function cloudflare(config: TurnConfig, ttl: number, f: Fetch): Promise<Ic
   return ([] as IceServer[]).concat(body.iceServers).filter((s) => [s.urls].flat().some((u) => u.startsWith("turn")));
 }
 
-/** Short-lived Metered.ca credentials created through its REST API (expiry in seconds). */
+/** Accepts "myapp", "myapp.metered.live" or "https://myapp.metered.live/" and returns "myapp". */
+export function meteredSubdomain(appName: string): string {
+  return appName
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/\.metered\.live$/i, "")
+    .toLowerCase();
+}
+
+/**
+ * Metered.ca credentials. Preferred: create a short-lived credential with the account
+ * *Secret Key*. If that key is rejected, the value is treated as a credential *API key* (the one
+ * shown on Metered's "TURN Credentials" page) and the ready-made ICE server list is fetched.
+ */
 async function metered(config: TurnConfig, ttl: number, f: Fetch): Promise<IceServer[]> {
-  const url = new URL(`https://${config.meteredAppName}.metered.live/api/v1/turn/credential`);
-  url.searchParams.set("secretKey", config.meteredSecretKey!);
-  const res = await f(url, {
+  const base = `https://${meteredSubdomain(config.meteredAppName!)}.metered.live/api/v1/turn`;
+  const key = config.meteredSecretKey!.trim();
+
+  const create = await f(`${base}/credential?secretKey=${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ expiryInSeconds: ttl, label: "meetspace" }),
     cache: "no-store",
   });
-  if (!res.ok) throw new Error(`Metered TURN ${res.status}`);
-  const cred = (await res.json()) as { username: string; password: string };
-  const host = "global.relay.metered.ca";
-  return [
-    {
-      urls: [`turn:${host}:80`, `turn:${host}:80?transport=tcp`, `turn:${host}:443`, `turns:${host}:443?transport=tcp`],
-      username: cred.username,
-      credential: cred.password,
-    },
-  ];
+  if (create.ok) {
+    const cred = (await create.json()) as { username: string; password: string };
+    const host = "global.relay.metered.ca";
+    return [
+      {
+        urls: [
+          `turn:${host}:80`,
+          `turn:${host}:80?transport=tcp`,
+          `turn:${host}:443`,
+          `turns:${host}:443?transport=tcp`,
+        ],
+        username: cred.username,
+        credential: cred.password,
+      },
+    ];
+  }
+
+  const list = await f(`${base}/credentials?apiKey=${encodeURIComponent(key)}`, { cache: "no-store" });
+  if (!list.ok) throw new Error(`Metered TURN ${create.status} (secret key) / ${list.status} (API key)`);
+  const servers = (await list.json()) as IceServer[];
+  return servers.filter((s) => [s.urls].flat().some((u) => u.startsWith("turn")));
 }
 
 /**

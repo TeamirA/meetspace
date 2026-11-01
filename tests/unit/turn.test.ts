@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createTurnProvider } from "@/infrastructure/turn/turnProvider";
+import { createTurnProvider, meteredSubdomain } from "@/infrastructure/turn/turnProvider";
 
 const cf = { cloudflareKeyId: "key", cloudflareApiToken: "token" };
 const mt = { meteredAppName: "app", meteredSecretKey: "secret" };
 
-function fakeFetch(opts: { cloudflare?: boolean; metered?: boolean }) {
+function fakeFetch(opts: { cloudflare?: boolean; metered?: boolean; meteredApiKey?: boolean }) {
   return vi.fn(async (input: string | URL) => {
     const url = String(input);
     if (url.includes("cloudflare")) {
@@ -15,6 +15,13 @@ function fakeFetch(opts: { cloudflare?: boolean; metered?: boolean }) {
           { urls: ["turn:turn.cloudflare.com:3478?transport=udp"], username: "u", credential: "c" },
         ],
       });
+    }
+    if (url.includes("/credentials?apiKey=")) {
+      if (!opts.meteredApiKey) return new Response("nope", { status: 401 });
+      return Response.json([
+        { urls: "stun:stun.relay.metered.ca:80" },
+        { urls: "turn:global.relay.metered.ca:80", username: "ku", credential: "kp" },
+      ]);
     }
     if (!opts.metered) return new Response("nope", { status: 401 });
     return Response.json({ username: "mu", password: "mp" });
@@ -38,6 +45,17 @@ describe("TURN provider", () => {
   it("works with Metered alone", async () => {
     const servers = await createTurnProvider(mt, fakeFetch({ metered: true })).getIceServers(60);
     expect(turnUrls(servers).every((u) => u.includes("metered"))).toBe(true);
+  });
+
+  it("accepts a Metered credential API key in place of the secret key", async () => {
+    const servers = await createTurnProvider(mt, fakeFetch({ meteredApiKey: true })).getIceServers(60);
+    expect(turnUrls(servers)).toEqual(["turn:global.relay.metered.ca:80"]);
+  });
+
+  it("normalizes Metered app names given as hosts or URLs", () => {
+    expect(meteredSubdomain("https://MyApp.metered.live/")).toBe("myapp");
+    expect(meteredSubdomain("myapp.metered.live")).toBe("myapp");
+    expect(meteredSubdomain(" myapp ")).toBe("myapp");
   });
 
   it("combines both providers", async () => {
