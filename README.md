@@ -6,6 +6,7 @@ Built with Next.js (App Router), native WebRTC, Supabase (Postgres, Realtime, St
 ## Features
 
 **Meetings**
+
 - Instant or scheduled meetings with short codes (`/m/abc-defg-hij`), copy link and `.ics` calendar export
 - Dashboard with upcoming and recent meetings, plus "Join with code"
 - Pre-join lobby: camera preview, mic level meter, device selection, join muted or with camera off
@@ -13,6 +14,7 @@ Built with Next.js (App Router), native WebRTC, Supabase (Postgres, Realtime, St
 - Guests can join with just a name when the host allows it
 
 **In the call**
+
 - Mesh WebRTC for up to 6 people, using the perfect-negotiation pattern
 - Grid and speaker views, active-speaker detection (Web Audio), pin any tile, picture-in-picture
 - Per-participant connection quality from `getStats()`
@@ -25,25 +27,26 @@ Built with Next.js (App Router), native WebRTC, Supabase (Postgres, Realtime, St
 - Keyboard shortcuts: `M` `V` `S` `H` `C` `P` `F` `W` `L`, with `?` for help
 
 **Everything else**
+
 - History of past meetings with participants, duration, shared files, chat transcript and the saved whiteboard
 - Settings: display name, avatar, default devices, noise suppression and echo cancellation, theme
 - Dark-first design with a light mode, responsive down to phones (bottom control bar, full-screen panels), installable PWA
 
 ## Security model
 
-| Layer | Protection |
-| --- | --- |
-| Audio and video | Always encrypted in transit by WebRTC's **DTLS-SRTP**, peer to peer. Media never touches our servers (unless a TURN relay is used, which only sees SRTP ciphertext). |
-| Optional E2EE media | Per meeting ("End-to-end encrypt audio & video"). Frames are AES-GCM encrypted in a worker with **Encoded Transforms** (`RTCRtpScriptTransform`, or Chrome's `createEncodedStreams`), using a key derived from the meeting key, so a TURN relay or any middlebox sees only ciphertext even after SRTP is removed. VP8 is preferred so the codec header can stay in the clear. |
-| Chat and files | **End-to-end encrypted.** Each participant creates an ephemeral ECDH P-256 key pair and publishes the public key in presence. A participant who holds the meeting's AES-GCM-256 group key wraps it for each newcomer using an HKDF-derived pairwise key. Messages, files *and file names* are encrypted in the browser with AES-GCM (random 96-bit IV, with the meeting id as associated data). The server stores only ciphertext. |
-| Key verification | Every participant sees a **security code** (derived from the group key). Comparing it out loud detects a man-in-the-middle during the key exchange. |
-| Key rotation | When the host removes someone, the room rotates to a new key epoch that the removed person never receives. |
-| Key storage | Group keys are kept in IndexedDB as `CryptoKey` objects, so history stays readable on the same device. They never leave the browser. |
-| Auth | Argon2id (19 MiB, t=2) password hashing. A 15-minute access JWT and a rotating refresh token, both in `httpOnly` cookies (the refresh cookie is `SameSite=Strict` and scoped to `/api/auth`). Refresh-token reuse revokes the whole token family. Lockout after 5 failed logins, plus IP and email rate limits. |
-| Transport | HTTPS, HSTS, a nonce-based CSP, `X-Frame-Options: DENY`, a strict `Permissions-Policy`, and same-origin checks on every state-changing API call. |
-| Authorization | Realtime **private channels**: the server issues a short-lived Supabase JWT whose `room_topic` claim is the only topic RLS on `realtime.messages` allows. Host decisions go out on a separate server-only system topic, so clients can trust them. TURN credentials, chat, files (via 60-second signed URLs on a private bucket) and the whiteboard all require admitted membership. |
-| Database | All tables are owned by a dedicated `meetspace_app` role with **RLS enabled and forced** and an owner-only policy, so Supabase's `anon` and `authenticated` roles can't read or write anything. |
-| Input | Every request body is validated with shared Zod schemas. Chat is rendered as text (never HTML); only `http(s)` URLs become links, and control and bidi-override characters are stripped. |
+| Layer               | Protection                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Audio and video     | Always encrypted in transit by WebRTC's **DTLS-SRTP**, peer to peer. Media never touches our servers (unless a TURN relay is used, which only sees SRTP ciphertext).                                                                                                                                                                                                                                                               |
+| Optional E2EE media | Per meeting ("End-to-end encrypt audio & video"). Frames are AES-GCM encrypted in a worker with **Encoded Transforms** (`RTCRtpScriptTransform`, or Chrome's `createEncodedStreams`), using a key derived from the meeting key, so a TURN relay or any middlebox sees only ciphertext even after SRTP is removed. VP8 is preferred so the codec header can stay in the clear.                                                      |
+| Chat and files      | **End-to-end encrypted.** Each participant creates an ephemeral ECDH P-256 key pair and publishes the public key in presence. A participant who holds the meeting's AES-GCM-256 group key wraps it for each newcomer using an HKDF-derived pairwise key. Messages, files _and file names_ are encrypted in the browser with AES-GCM (random 96-bit IV, with the meeting id as associated data). The server stores only ciphertext. |
+| Key verification    | Every participant sees a **security code** (derived from the group key). Comparing it out loud detects a man-in-the-middle during the key exchange.                                                                                                                                                                                                                                                                                |
+| Key rotation        | When the host removes someone, the room rotates to a new key epoch that the removed person never receives.                                                                                                                                                                                                                                                                                                                         |
+| Key storage         | Group keys are kept in IndexedDB as `CryptoKey` objects, so history stays readable on the same device. They never leave the browser.                                                                                                                                                                                                                                                                                               |
+| Auth                | Argon2id (19 MiB, t=2) password hashing. A 15-minute access JWT and a rotating refresh token, both in `httpOnly` cookies (the refresh cookie is `SameSite=Strict` and scoped to `/api/auth`). Refresh-token reuse revokes the whole token family. Lockout after 5 failed logins, plus IP and email rate limits.                                                                                                                    |
+| Transport           | HTTPS, HSTS, a nonce-based CSP, `X-Frame-Options: DENY`, a strict `Permissions-Policy`, and same-origin checks on every state-changing API call.                                                                                                                                                                                                                                                                                   |
+| Authorization       | Realtime **private channels**: the server issues a short-lived Supabase JWT whose `room_topic` claim is the only topic RLS on `realtime.messages` allows. Host decisions go out on a separate server-only system topic, so clients can trust them. TURN credentials, chat, files (via 60-second signed URLs on a private bucket) and the whiteboard all require admitted membership.                                               |
+| Database            | All tables are owned by a dedicated `meetspace_app` role with **RLS enabled and forced** and an owner-only policy, so Supabase's `anon` and `authenticated` roles can't read or write anything.                                                                                                                                                                                                                                    |
+| Input               | Every request body is validated with shared Zod schemas. Chat is rendered as text (never HTML); only `http(s)` URLs become links, and control and bidi-override characters are stripped.                                                                                                                                                                                                                                           |
 
 Known limits: a mesh tops out around 6 people. Key exchange trusts the relay unless people compare security codes. A removed participant can keep receiving room broadcasts (now encrypted under a key they don't have) until their 10-minute room token expires. Live captions use the browser's speech service, which may be cloud-based.
 
@@ -68,7 +71,7 @@ src/
 └── lib/                 Shared Zod schemas, API client with token refresh, sanitizer, ICS builder
 ```
 
-**Signaling.** Each room uses one private Supabase Realtime channel. Presence carries each person's media state, ECDH public key and key id. Broadcast envelopes are addressed to a participant *and session* (offer/answer/ICE, key offers, chat, file notices, whiteboard ops). Peer connections each carry a pre-negotiated data channel for low-latency whiteboard previews.
+**Signaling.** Each room uses one private Supabase Realtime channel. Presence carries each person's media state, ECDH public key and key id. Broadcast envelopes are addressed to a participant _and session_ (offer/answer/ICE, key offers, chat, file notices, whiteboard ops). Peer connections each carry a pre-negotiated data channel for low-latency whiteboard previews.
 
 **Whiteboard sync.** Only incremental ops are sent (`upsert`, `delete`, `clear`), each stamped with a Lamport clock, so every client converges whatever the delivery order. Late joiners load the persisted board and ask the earliest-joined participant for unsaved changes. That same "leader" debounces saves to Postgres.
 
@@ -84,13 +87,14 @@ npm run dev
 ```
 
 Supabase setup (already applied to the production project):
+
 1. Create a `meetspace_app` login role with `USAGE, CREATE` on `public`. Prisma connects as this role through the Supavisor pooler.
 2. Run the migrations. They create the tables and enable and force RLS.
 3. Add RLS policies on `realtime.messages` that allow `select` and `insert` for `authenticated` when `realtime.topic() = auth.jwt() ->> 'room_topic'`.
 4. Create a private Storage bucket named `meeting-files` with a 51 MB limit and no policies.
 5. Copy the service role key and the legacy JWT secret into `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_JWT_SECRET`.
 
-Without TURN keys, calls use Google STUN only. That works on most networks but not behind strict symmetric NATs. Add `METERED_APP_NAME` and `METERED_SECRET_KEY`, or `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN`, to enable relaying.
+Without TURN keys, calls use Google STUN only. That works on most networks but not behind strict symmetric NATs. Configure Cloudflare, Metered, or both to enable relaying; step-by-step instructions are in [docs/turn-setup.md](docs/turn-setup.md).
 
 ## Testing
 
