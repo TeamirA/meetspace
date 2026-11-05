@@ -28,7 +28,9 @@ export interface Envelope<T = unknown> {
   payload: T;
 }
 
-export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "closed";
+const JOIN_TIMEOUT_MS = 20_000;
+
+export type ConnectionStatus ="connecting" | "connected" | "reconnecting" | "closed";
 
 interface Options {
   supabaseUrl: string;
@@ -112,22 +114,28 @@ export class SignalingClient {
       })
       .on("presence", { event: "sync" }, () => this.emitPresence());
 
+    // A first attempt can time out on a cold or slow connection; Supabase retries the join by
+    // itself, so only give up if the channel still isn't subscribed after JOIN_TIMEOUT_MS.
     await new Promise<void>((resolve, reject) => {
       let settled = false;
+      let lastError: Error | undefined;
+      const giveUp = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(lastError ?? new Error("Realtime join timed out"));
+      }, JOIN_TIMEOUT_MS);
       room.subscribe(async (status, err) => {
         if (status === "SUBSCRIBED") {
           await room.track(this.presence!);
           this.setStatus("connected");
           if (!settled) {
             settled = true;
+            clearTimeout(giveUp);
             resolve();
           }
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           this.setStatus("reconnecting");
-          if (!settled) {
-            settled = true;
-            reject(err ?? new Error(`Realtime ${status.toLowerCase()}`));
-          }
+          lastError = err ?? new Error(`Realtime ${status.toLowerCase()}`);
         } else if (status === "CLOSED") {
           this.setStatus(this.status === "closed" ? "closed" : "reconnecting");
         }
