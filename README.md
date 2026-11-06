@@ -1,7 +1,23 @@
 # Meetspace
 
+[![CI](https://github.com/TeamirA/meetspace/actions/workflows/ci.yml/badge.svg)](https://github.com/TeamirA/meetspace/actions/workflows/ci.yml)
+
 Video meetings, screen sharing, a shared whiteboard and end-to-end encrypted chat and files, in the browser.
 Built with Next.js (App Router), native WebRTC, Supabase (Postgres, Realtime, Storage) and deployed on Vercel.
+
+**Live demo:** https://meetspace-taupe.vercel.app
+
+## Try it
+
+1. Open the live demo and create an account (any email format works; no verification email is sent).
+2. On the dashboard, choose **New meeting → Start an instant meeting** and allow camera and microphone access.
+3. Copy the link with **Invite** and open it in a second browser profile or on another device, signed in with a second account.
+4. Admit the second person from the waiting-room banner, then try chat (`C`), the whiteboard (`W`), screen sharing (`S`), reactions, file sharing in the chat panel and the host controls in the people panel (`P`). Press `?` for all shortcuts.
+5. End the meeting and open it under **History** to see the saved whiteboard, decrypted chat and shared files.
+
+## Tech stack
+
+Next.js 16 (App Router, route handlers, proxy) · TypeScript · Tailwind CSS 4 · Radix UI · Motion · Zustand · TanStack Query · native WebRTC (mesh, perfect negotiation, Encoded Transforms) · Supabase Realtime, Postgres and Storage · Prisma 7 · Web Crypto (ECDH, HKDF, AES-GCM) · Argon2id + JWT · react-konva + perfect-freehand · Zod · Vitest · Playwright · Vercel · Metered/Cloudflare TURN
 
 ## Features
 
@@ -90,9 +106,8 @@ Supabase setup (already applied to the production project):
 
 1. Create a `meetspace_app` login role with `USAGE, CREATE` on `public`. Prisma connects as this role through the Supavisor pooler.
 2. Run the migrations. They create the tables and enable and force RLS.
-3. Add RLS policies on `realtime.messages` that allow `select` and `insert` for `authenticated` when `realtime.topic() = auth.jwt() ->> 'room_topic'`.
-4. Create a private Storage bucket named `meeting-files` with a 51 MB limit and no policies.
-5. Copy the service role key and the legacy JWT secret into `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_JWT_SECRET`.
+3. Run [supabase/realtime-and-storage.sql](supabase/realtime-and-storage.sql). It adds the RLS policies on `realtime.messages` (members can read their room and system topics, but write only to the room topic) and creates the private `meeting-files` Storage bucket (51 MB limit, no policies).
+4. Copy the service role key and the legacy JWT secret into `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_JWT_SECRET`.
 
 Without TURN keys, calls use Google STUN only. That works on most networks but not behind strict symmetric NATs. Configure Cloudflare, Metered, or both to enable relaying; step-by-step instructions are in [docs/turn-setup.md](docs/turn-setup.md).
 
@@ -108,3 +123,7 @@ npm run lint && npm run typecheck
 ## Deployment
 
 The app runs entirely on Vercel (serverless route handlers plus static assets). There's no long-running server: Supabase handles realtime, storage and the database. Set the variables from `.env.example` in the Vercel project, then push to `main`.
+
+## License
+
+[MIT](LICENSE) © 2026 Teamir Abdurahman
